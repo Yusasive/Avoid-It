@@ -12,25 +12,32 @@ class _DeenAIPageState extends State<DeenAIPage> {
   List<Map<String, String>> chatHistory = [];
   bool _isLoading = false;
 
-  // Function to send the user's query to the Gemini API (instead of OpenAI)
+  // Function to send the user's query to the Hugging Face API with custom context
   Future<void> sendQuery(String question) async {
     setState(() {
       _isLoading = true;
-      chatHistory.add({"user": question});  // Add user's query to chat history
+      chatHistory.add({"user": question}); // Add user's query to chat history
     });
 
-    final apiKey = 'AIzaSyAR5E-4Dr9e20F8WpYW1pqklrwIiRy7OFc';  // Replace with your Gemini API Key
-    final url = Uri.parse('https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=$apiKey');  // Replace with the actual Gemini API endpoint
+    final apiKey =
+        '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'; // Replace with your Hugging Face API Key
+    final url = Uri.parse(
+        'https://api-inference.huggingface.co/models/gpt2'); // Replace with the model you want to use
+
+    // Define the context for your chatbot (Islamic knowledge AI)
+    final context =
+        'You are an Islamic knowledge AI. Answer questions based on Islamic teachings and provide relevant Quranic references where applicable.';
+
+    // Combine the context and question
+    final fullPrompt = '$context\nQuestion: $question\nAnswer:';
 
     final headers = {
-      'Content-Type': 'application/json',
       'Authorization': 'Bearer $apiKey',
+      'Content-Type': 'application/json',
     };
 
     final body = jsonEncode({
-      'prompt': question,
-      'context': 'You are an Islamic knowledge AI. Answer questions based on Islamic teachings and provide relevant Quranic references where applicable.',
-      'model': 'gemini-model-name',  // Replace with the correct Gemini model name
+      'inputs': fullPrompt, // Send the combined context and user's question
     });
 
     try {
@@ -38,10 +45,27 @@ class _DeenAIPageState extends State<DeenAIPage> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        String aiResponse = data['response'] ?? "No response from AI.";  // Adjust according to Gemini response format
-        setState(() {
-          chatHistory.add({"bot": aiResponse});  // Add AI's response to chat history
-        });
+
+        // Check if the response is a list and contains generated text
+        if (data is List && data.isNotEmpty && data[0].containsKey('generated_text')) {
+          String aiResponse = data[0]['generated_text'];
+          setState(() {
+            chatHistory.add({"bot": aiResponse}); // Add AI's response to chat history
+          });
+        } else {
+          setState(() {
+            chatHistory.add({"bot": "Unexpected response format from API."});
+          });
+        }
+      } else if (response.statusCode == 503 && response.body.contains("loading")) {
+        // If the model is loading, wait for the estimated time and try again
+        final estimatedTime = jsonDecode(response.body)['estimated_time'];
+        print("Model is loading. Retrying in $estimatedTime seconds...");
+
+        await Future.delayed(Duration(seconds: estimatedTime.toInt()));
+
+        // Retry the request after the model finishes loading
+        await sendQuery(question);
       } else {
         setState(() {
           chatHistory.add({"bot": "Error: ${response.statusCode}. ${response.body}"});
@@ -60,7 +84,8 @@ class _DeenAIPageState extends State<DeenAIPage> {
 
   // Function to fetch a Quranic verse dynamically based on the user's question
   Future<void> fetchQuranVerse(int ayahNumber) async {
-    final url = Uri.parse('https://api.alquran.cloud/v1/ayah/$ayahNumber/en.asad');
+    final url =
+        Uri.parse('https://api.alquran.cloud/v1/ayah/$ayahNumber/en.asad');
 
     try {
       final response = await http.get(url);
@@ -69,11 +94,15 @@ class _DeenAIPageState extends State<DeenAIPage> {
         final data = jsonDecode(response.body);
         String verseText = data['data']['text'];
         setState(() {
-          chatHistory.add({"bot": "Quran Verse: $verseText"});  // Display Quran verse in chat history
+          chatHistory.add({
+            "bot": "Quran Verse: $verseText"
+          }); // Display Quran verse in chat history
         });
       } else {
         setState(() {
-          chatHistory.add({"bot": "Error: ${response.statusCode}. ${response.body}"});
+          chatHistory.add({
+            "bot": "Error: ${response.statusCode}. ${response.body}"
+          }); // Error handling
         });
       }
     } catch (e) {
@@ -101,12 +130,15 @@ class _DeenAIPageState extends State<DeenAIPage> {
                   final message = chatHistory[index];
                   final isUser = message.containsKey("user");
                   return Align(
-                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment:
+                        isUser ? Alignment.centerRight : Alignment.centerLeft,
                     child: Container(
                       padding: EdgeInsets.all(12),
                       margin: EdgeInsets.symmetric(vertical: 8),
                       decoration: BoxDecoration(
-                        color: isUser ? const Color.fromARGB(255, 206, 91, 226) : Colors.grey[300],
+                        color: isUser
+                            ? const Color.fromARGB(255, 206, 91, 226)
+                            : Colors.grey[300],
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
@@ -137,13 +169,13 @@ class _DeenAIPageState extends State<DeenAIPage> {
                     ),
                   ),
                 ),
-                SizedBox(width: 10),  // Add some space between the input and the button
+                SizedBox(
+                    width:
+                        10), // Add some space between the input and the button
                 ElevatedButton(
                   onPressed: () {
                     if (_controller.text.isNotEmpty) {
                       sendQuery(_controller.text);
-                      // Optionally, you can fetch a Quranic verse dynamically.
-                      // fetchQuranVerse(2);  // Fetch example verse (Surah Baqarah, Ayah 2)
                       _controller.clear();
                     }
                   },
